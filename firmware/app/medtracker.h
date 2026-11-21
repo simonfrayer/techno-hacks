@@ -9,7 +9,7 @@
 // posted over HTTP to the Python server -> it returns extracted fields
 // -> pick a storage place with the knob, press the knob to confirm -> `record`
 // is posted -> the server returns `ok` / `error`. Temperature and humidity are
-// reported every 20 s (`report_seconds`); the status light shows the storage conditions.
+// reported every 15 s (`report_seconds`); the status light shows the storage conditions.
 //
 // Wire protocol (atech events/actions) is documented in ../../CLAUDE.md.
 #pragma once
@@ -127,10 +127,11 @@ namespace med
   static int sel = 0;
   static bool knobReverse = false;
 
-  static float tMin = 2.0f, tMax = 25.0f, hMax = 60.0f;
+  static float tMin = 2.0f, tMax = 26.0f, hMax = 50.0f;
   static float lastT = NAN, lastH = NAN;
   static int climateLevel = -1; // 0 ok, 1 near limit, 2 over, -1 unknown
-  static uint32_t reportMinutes = 60;
+  static constexpr uint32_t CLIMATE_SAMPLE_SECONDS = 15;
+  static uint32_t reportSeconds = 300; // 5 minutes
   static unsigned long lastReportMs = 0;
   static bool firstReportDone = false;
 
@@ -171,70 +172,6 @@ namespace med
     if (n <= 0 || n >= (int)sizeof(line))
       return false;
     return writeLine(line, n, waitMs);
-  }
-
-  static bool httpPost(const char *path, const char *contentType,
-                       uint8_t *body, size_t length, char *response, size_t responseSize)
-  {
-    if (WiFi.status() != WL_CONNECTED)
-    {
-      snprintf(response, responseSize, "{\"error\":\"No Wi-Fi\"}");
-      return false;
-    }
-    HTTPClient http;
-    char url[160];
-    snprintf(url, sizeof(url), "%s%s", HTTP_SERVER_URL, path);
-    if (!http.begin(url))
-    {
-      snprintf(response, responseSize, "{\"error\":\"HTTP begin failed\"}");
-      return false;
-    }
-    http.setTimeout(5000);
-    http.addHeader("Content-Type", contentType);
-    int code = http.POST(body, length);
-    if (code <= 0)
-    {
-      String error = http.errorToString(code);
-      http.end();
-      snprintf(response, responseSize, "{\"error\":\"%s\"}", error.c_str());
-      return false;
-    }
-    String payload = http.getString();
-    http.end();
-    if (payload.length() >= (int)responseSize)
-      return false;
-    payload.toCharArray(response, responseSize);
-    return code >= 200 && code < 300;
-  }
-
-  static bool httpPostJson(const char *path, const char *body, char *response, size_t responseSize)
-  {
-    return httpPost(path, "application/json",
-                    (uint8_t *)body, strlen(body), response, responseSize);
-  }
-
-  static bool httpGet(const char *path, char *response, size_t responseSize)
-  {
-    if (WiFi.status() != WL_CONNECTED)
-      return false;
-    HTTPClient http;
-    char url[160];
-    snprintf(url, sizeof(url), "%s%s", HTTP_SERVER_URL, path);
-    if (!http.begin(url))
-      return false;
-    http.setTimeout(5000);
-    int code = http.GET();
-    if (code <= 0)
-    {
-      http.end();
-      return false;
-    }
-    String payload = http.getString();
-    http.end();
-    if (payload.length() >= (int)responseSize)
-      return false;
-    payload.toCharArray(response, responseSize);
-    return code >= 200 && code < 300;
   }
 
   static bool httpPost(const char *path, const char *contentType,
@@ -394,7 +331,7 @@ namespace med
                lastT, lastH, st, reason, tMin, tMax, hMax);
     }
     emit("climate", v);
-    char response[160];
+    char response[160] = "";
     httpPostJson("/api/v1/climate", v, response, sizeof(response));
   }
 
@@ -603,27 +540,23 @@ namespace med
     setState(WAIT_SAVE);
     emit("record", v, 200);
     char response[160];
-    if (httpPostJson("/api/v1/records", v, response, sizeof(response)))
+    bool posted = httpPostJson("/api/v1/records", v, response, sizeof(response));
+    char ok[8] = "";
+    if (posted && jsonField(response, "ok", ok, sizeof(ok)) && !strcmp(ok, "true"))
     {
-      if (strstr(response, "\"ok\":true"))
-      {
-        lastSaveKind = 1;
-        showResult(1, "Stored in DB");
-      }
-      else
-      {
-        lastSaveKind = 2;
-        char msg[40] = "";
-        if (jsonField(response, "error", msg, sizeof(msg)))
-          showResult(2, msg);
-        else
-          showResult(2, "Save failed");
-      }
+      lastSaveKind = 1;
+      showResult(1, "Stored in DB");
     }
     else
     {
       lastSaveKind = 2;
-      showResult(2, "Server error");
+      char error[40] = "";
+      if (!jsonField(response, "error", error, sizeof(error)) || !strcmp(error, "null"))
+      {
+        if (!jsonField(response, "message", error, sizeof(error)) || !strcmp(error, "null"))
+          strcpy(error, "Save failed");
+      }
+      showResult(2, error);
     }
   }
 
@@ -848,15 +781,26 @@ namespace med
       sendClimate("requested");
       return 1;
     }
+    if (!strcmp(a, "report_seconds"))
+    {
+      int seconds = atoi(value);
+      if (seconds < 5)
+      {
+        *err = "seconds must be >= 5";
+        return 2;
+      }
+      reportSeconds = seconds;
+      return 1;
+    }
     if (!strcmp(a, "report_minutes"))
     {
-      int m = atoi(value);
-      if (m < 1)
+      int minutes = atoi(value);
+      if (minutes < 1)
       {
         *err = "minutes must be >= 1";
         return 2;
       }
-      reportMinutes = m;
+      reportSeconds = (uint32_t)minutes * 60;
       return 1;
     }
     if (!strcmp(a, "knob_reverse"))
@@ -906,11 +850,11 @@ namespace med
         tMax = atof(tmp);
       if (jsonField(config, "h_max", tmp, sizeof(tmp)))
         hMax = atof(tmp);
-      if (jsonField(config, "report_minutes", tmp, sizeof(tmp)))
+      if (jsonField(config, "report_seconds", tmp, sizeof(tmp)))
       {
-        int m = atoi(tmp);
-        if (m >= 1)
-          reportMinutes = m;
+        int seconds = atoi(tmp);
+        if (seconds >= 5)
+          reportSeconds = seconds;
       }
     }
 
@@ -956,11 +900,11 @@ namespace med
           tMax = atof(tmp);
         if (jsonField(config, "h_max", tmp, sizeof(tmp)))
           hMax = atof(tmp);
-        if (jsonField(config, "report_minutes", tmp, sizeof(tmp)))
+        if (jsonField(config, "report_seconds", tmp, sizeof(tmp)))
         {
-          int m = atoi(tmp);
-          if (m >= 1)
-            reportMinutes = m;
+          int seconds = atoi(tmp);
+          if (seconds >= 5)
+            reportSeconds = seconds;
         }
         httpConfigLoaded = true;
         screenDirty = true;
@@ -1026,21 +970,18 @@ namespace med
       }
     }
 
-    // climate: read every 10 s, report every reportMinutes (and once at start)
-    if (climateTimer.ready(10000))
+    // Check conditions every 15 seconds
+    if (climateTimer.ready(CLIMATE_SAMPLE_SECONDS * 1000UL))
     {
-      readClimate();
-      if (!firstReportDone && !isnan(lastT))
-      {
-        sendClimate("startup");
-        firstReportDone = true;
-        lastReportMs = millis();
-      }
+      readClimate(); // Already sends status_change when needed
     }
-    if (millis() - lastReportMs >= reportMinutes * 60000UL)
+
+    // Send baseline reading every 5 minutes
+    if (millis() - lastReportMs >= reportSeconds * 1000UL)
     {
       lastReportMs = millis();
-      sendClimate("hourly");
+      sendClimate(firstReportDone ? "periodic" : "startup");
+      firstReportDone = true;
     }
 
     if (!frameTimer.ready(30))

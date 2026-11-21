@@ -72,8 +72,8 @@ def test_configures_board(tmp_path):
     bridge.handle(ev("app_info", {"app": "medtracker"}))
     assert board.calls == [
         ("places", "Pharmacy shelf A,Pharmacy shelf B,Fridge,Cabinet 1,Cabinet 2"),
-        ("limits", {"t_min": 2.0, "t_max": 25.0, "h_max": 60.0}),
-        ("report_seconds", 20),
+        ("limits", {"t_min": 2.0, "t_max": 26.0, "h_max": 50.0}),
+        ("report_seconds", 15),
     ]
 
 
@@ -151,7 +151,7 @@ def test_board_refusal_does_not_crash(tmp_path):
 def test_climate_is_logged(tmp_path):
     _, backend, bridge = make(tmp_path)
     bridge.handle(ev("climate", {"temp_c": 24.5, "humidity": 40.0, "status": "warning", "reason": "hourly",
-                                 "t_min": 2.0, "t_max": 25.0, "h_max": 60.0}))
+                                 "t_min": 2.0, "t_max": 26.0, "h_max": 50.0}))
     bridge.handle(ev("climate", {"ok": False, "reason": "startup"}))
     [row] = backend.store.climate()
     assert (row["temp_c"], row["status"]) == (24.5, "warning")
@@ -170,7 +170,7 @@ def test_settings_validation_and_toml(tmp_path):
 
 
 def test_report_interval_in_seconds(tmp_path):
-    assert Settings().report_seconds == 20
+    assert Settings().report_seconds == 15
     with pytest.raises(ValueError):
         Settings(report_seconds=2)
     old = tmp_path / "old.toml"

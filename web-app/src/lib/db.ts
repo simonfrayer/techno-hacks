@@ -1,34 +1,63 @@
-import type { Database } from "sql.js";
-
 export type RecordRow = {
-  id: number; created_at: string; device_record_id: number | null; name: string;
-  expiry: string; quantity: string; place: string; transcript: string | null; audio_path: string | null;
+  id: number;
+  created_at: string;
+  device_record_id: number | null;
+  name: string;
+  expiry: string;
+  quantity: string;
+  place: string;
+  transcript: string | null;
+  audio_path: string | null;
 };
 export type ClimateRow = {
-  id: number; created_at: string; temp_c: number | null; humidity: number | null; status: string | null;
-  reason: string | null; t_min: number | null; t_max: number | null; h_max: number | null;
+  id: number;
+  created_at: string;
+  temp_c: number | null;
+  humidity: number | null;
+  status: string | null;
+  reason: string | null;
+  t_min: number | null;
+  t_max: number | null;
+  h_max: number | null;
 };
 
-export async function openDb(buf: ArrayBuffer): Promise<Database> {
-  const initSqlJs = (await import("sql.js")).default;
-  const SQL = await initSqlJs({ locateFile: () => "/sql-wasm.wasm" , useOldExtensionFunctions: false });
-  return new SQL.Database(new Uint8Array(buf));
-}
+const API_BASE_URL = (
+  import.meta.env["VITE_MEDTRACKER_API_URL"] || "http://localhost:8080"
+).replace(/\/+$/, "");
 
-function all<T>(db: Database, sql: string): T[] {
+async function get<T>(path: string): Promise<T> {
+  let response: Response;
   try {
-    const res = db.exec(sql)[0];
-    if (!res) return [];
-    return res.values.map((v) => Object.fromEntries(res.columns.map((c, i) => [c, v[i]])) as T);
-  } catch { return []; }
+    response = await fetch(`${API_BASE_URL}/api/v1/${path}?limit=5000`);
+  } catch {
+    throw new Error(
+      `Cannot fetch from ${API_BASE_URL}. Check the API URL, server status, and allowed web origins.`,
+    );
+  }
+  if (!response.ok) {
+    throw new Error(`Database API returned HTTP ${response.status}`);
+  }
+  return response.json() as Promise<T>;
 }
 
-export const readRecords = (db: Database) => all<RecordRow>(db, "SELECT * FROM records ORDER BY expiry ASC");
-export const readClimate = (db: Database) => all<ClimateRow>(db, "SELECT * FROM climate ORDER BY created_at DESC");
+export async function fetchDashboardData(): Promise<{
+  records: RecordRow[];
+  climate: ClimateRow[];
+}> {
+  const [recordData, climateData] = await Promise.all([
+    get<{ records: RecordRow[] }>("records"),
+    get<{ climate: ClimateRow[] }>("climate"),
+  ]);
+  return {
+    records: recordData.records.sort((a, b) => a.expiry.localeCompare(b.expiry)),
+    climate: climateData.climate,
+  };
+}
 
 export function daysUntil(date: string): number | null {
   const d = new Date(date);
   if (isNaN(d.getTime())) return null;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
   return Math.round((d.getTime() - today.getTime()) / 86400000);
 }

@@ -4,7 +4,7 @@
 places = ["Pharmacy shelf A", "Pharmacy shelf B", "Fridge", "Cabinet 1", "Cabinet 2"]
 # Climate limits. "Near a limit" = within 1 °C of t_min/t_max or 5 points of h_max.
 t_min = 2.0
-t_max = 25.0
-h_max = 60.0
+t_max = 26.0
+h_max = 50.0
 # How often the board reports temperature and humidity (seconds, at least 5)
-report_seconds = 20
+report_seconds = 15

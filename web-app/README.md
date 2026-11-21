@@ -21,6 +21,18 @@ npm i
 npm run dev
 ```
 
+## MedTracker data
+
+The app reads records and climate readings from the local MedTracker HTTP API.
+Start the API from the repository root with `uv run techno-hacks serve`. The
+development app defaults to `http://localhost:8080` and refreshes the data
+every 15 seconds. The API permits browser requests from `localhost` and
+loopback IP origins on any port. For an origin on another host, set
+`MEDTRACKER_WEB_ORIGINS` (comma-separated) on the API server.
+To use a different API host, set
+`VITE_MEDTRACKER_API_URL` in the web app environment (for example,
+`http://192.168.1.20:8080`). The API must be reachable from the browser.
+
 ## Built with
 
 - TanStack Start

@@ -5,6 +5,16 @@ button and say the medicine's name, expiry date and tablet count. Pick a storage
 place with the knob, and the record lands in a local database. The board also
 watches the storage temperature and humidity.
 
+## Problem
+
+_People tend to run out of or miss the expiration dates of their medicine without noticing and then not having them when in need._
+
+## Device
+
+Device used was provided by Atech (Big Kit).
+
+![Atech Big Kit](IMG_7153.JPEG)
+
 ## Setup
 
 ```bash

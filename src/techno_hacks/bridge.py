@@ -44,9 +44,9 @@ def screen_text(text: str) -> str:
 class Settings:
     places: list[str] = field(default_factory=lambda: list(DEFAULT_PLACES))
     t_min: float = 2.0
-    t_max: float = 25.0
-    h_max: float = 60.0
-    report_seconds: int = 20
+    t_max: float = 26.0
+    h_max: float = 50.0
+    report_seconds: int = 15
 
     def __post_init__(self) -> None:
         if self.report_seconds < 5:

@@ -91,7 +91,7 @@ uv run atech monitor / atech send <action> <value>               # debugging (no
      the top row turns red.
    - The top-row colour stays until the next recording. The result screen goes
      back to READY after 4 s.
-6. Temperature and humidity are reported **every 20 s** (`report_seconds` in
+6. Temperature and humidity are reported **every 15 s** (`report_seconds` in
    medtracker.toml; changed from hourly on 2026-11-21), at startup, and on every
    status change.
 
@@ -107,9 +107,9 @@ Other timeouts:
   busy, then green or red for the last save.
 - **Rows 1–2** show the storage climate: green is ok, orange is near a limit, red
   is over a limit, grey is no reading.
-- Default limits are **2–25 °C** and **humidity at most 60 %**. "Near a limit"
+- Default limits are **2–26 °C** and **humidity at most 50 %**. "Near a limit"
   means within **1 °C** of either temperature limit or within **5 points** of the
-  humidity limit. The sensor is read every 10 s, and the screen's bottom line (`23.4C 45%`)
+  humidity limit. The sensor is read every 15 s, and the screen's bottom line (`23.4C 45%`)
   redraws whenever the shown value changes.
 
 ## Protocol (atech events/actions over USB)
