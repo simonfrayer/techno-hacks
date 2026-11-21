@@ -46,9 +46,11 @@ class Settings:
     t_min: float = 2.0
     t_max: float = 25.0
     h_max: float = 60.0
-    report_minutes: int = 60
+    report_seconds: int = 20
 
     def __post_init__(self) -> None:
+        if self.report_seconds < 5:
+            raise ValueError("report_seconds: at least 5")
         if not 1 <= len(self.places) <= 10:
             raise ValueError("places: between 1 and 10 entries")
         for p in self.places:
@@ -61,6 +63,8 @@ class Settings:
         if not path.is_file():
             return cls()
         data = tomllib.loads(path.read_text(encoding="utf-8")).get("device", {})
+        if "report_minutes" in data and "report_seconds" not in data:   # older config files
+            data["report_seconds"] = int(data["report_minutes"]) * 60
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
         return cls(**known)
 
@@ -84,7 +88,7 @@ class Bridge:
         for key, value in (
             ("places", ",".join(screen_text(p) for p in s.places)),
             ("limits", {"t_min": s.t_min, "t_max": s.t_max, "h_max": s.h_max}),
-            ("report_minutes", s.report_minutes),
+            ("report_seconds", s.report_seconds),
         ):
             try:
                 self.board.call(key, value, timeout=2.0)
@@ -97,8 +101,8 @@ class Bridge:
                 return False
             except ActionError as exc:
                 log.warning("board refused %s: %s", key, exc)
-        log.info("board configured: %d places, %.1f-%.1f C, humidity <= %.0f %%",
-                 len(s.places), s.t_min, s.t_max, s.h_max)
+        log.info("board configured: %d places, %.1f-%.1f C, humidity <= %.0f %%, climate report every %d s",
+                 len(s.places), s.t_min, s.t_max, s.h_max, s.report_seconds)
         return True
 
     # ------------------------------------------------------------ events

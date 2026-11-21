@@ -6,5 +6,5 @@ places = ["Pharmacy shelf A", "Pharmacy shelf B", "Fridge", "Cabinet 1", "Cabine
 t_min = 2.0
 t_max = 25.0
 h_max = 60.0
-# How often the board reports temperature and humidity
-report_minutes = 60
+# How often the board reports temperature and humidity (seconds, at least 5)
+report_seconds = 20

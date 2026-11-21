@@ -53,7 +53,12 @@ uv run atech monitor / atech send <action> <value>               # debugging (no
      ```
   3. Press RESET afterwards.
 
-  Try `atech upload` first; it may work now that the SDK firmware runs.
+  Once the SDK firmware was on the board, plain `atech upload firmware` worked
+  (2026-11-21). The manual way is only needed when that fails.
+- Every build prints compiler warnings from the SDK-generated main.cpp and the
+  SDK's drivers: unused `atechTruthy`/`atechNums`, deprecated pcnt/i2s drivers,
+  `-Wreorder` in i2c_software, `%d` format in microphone.cpp. They are harmless.
+  Only warnings in `firmware/app/medtracker.h` are ours.
 - The toolchain is PlatformIO espressif32 with **Arduino core 3.3** (not 2.0 as the
   SDK guide says). The first build downloads about 2.4 GB into `~/.platformio`.
   A clean build takes about 2 min.
@@ -86,7 +91,8 @@ uv run atech monitor / atech send <action> <value>               # debugging (no
      the top row turns red.
    - The top-row colour stays until the next recording. The result screen goes
      back to READY after 4 s.
-6. Temperature and humidity are reported hourly, at startup, and on every
+6. Temperature and humidity are reported **every 20 s** (`report_seconds` in
+   medtracker.toml; changed from hourly on 2026-11-21), at startup, and on every
    status change.
 
 Other timeouts:
@@ -103,7 +109,8 @@ Other timeouts:
   is over a limit, grey is no reading.
 - Default limits are **2–25 °C** and **humidity at most 60 %**. "Near a limit"
   means within **1 °C** of either temperature limit or within **5 points** of the
-  humidity limit. The sensor is read every 10 s.
+  humidity limit. The sensor is read every 10 s, and the screen's bottom line (`23.4C 45%`)
+  redraws whenever the shown value changes.
 
 ## Protocol (atech events/actions over USB)
 
@@ -128,7 +135,7 @@ Bridge → board actions (each acked; failures come back as `ok:false` with a re
   with "stale id".
 - `audio_resend` (seq): the board sends that chunk again.
 - Config: `places` (comma list, at most 10 × 23 characters), `limits`
-  `{t_min,t_max,h_max}`, `climate_now`, `report_minutes`, `knob_reverse`,
+  `{t_min,t_max,h_max}`, `climate_now`, `report_seconds` (min 5; `report_minutes` still accepted), `knob_reverse`,
   `cancel`.
 
 Board screen text is ASCII only. The bridge's `screen_text()` transliterates
