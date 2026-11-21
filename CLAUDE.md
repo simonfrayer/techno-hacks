@@ -37,7 +37,23 @@ uv run atech monitor / atech send <action> <value>               # debugging (no
   includes `../../app/medtracker.h` relative to `firmware/build/src/main.cpp`.
   The Python `Project.build()` default output dir would break that path.
 - Only one program can hold the serial port: the bridge, `atech monitor`,
-  `pyserial-miniterm` or an atech.dev Web Serial tab.
+  `pyserial-miniterm` or an atech.dev Web Serial tab. Check with
+  `lsof /dev/cu.usbmodem1101` (run by the user; the sandbox cannot see other
+  processes or open the port).
+- **Flashing on this board (2026-11-21):** `atech upload` failed with "Failed to
+  connect to ESP32-S3: No serial data received". The USB-JTAG auto-reset did not
+  get the chip into download mode. What worked was flashing by hand:
+  1. Put the board in download mode: hold BOOT, tap RESET, then release BOOT.
+  2. Run esptool directly with `--before no-reset`, from
+     `firmware/build/.pio/build/esp32-s3-devkitc-1/`, after `atech build firmware`:
+     ```bash
+     ~/.platformio/packages/tool-esptool/esptool --chip esp32s3 --port /dev/cu.usbmodem1101 \
+       --before no-reset --after hard-reset write-flash -z 0x0 bootloader.bin 0x8000 partitions.bin \
+       0xe000 ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin 0x10000 firmware.bin
+     ```
+  3. Press RESET afterwards.
+
+  Try `atech upload` first; it may work now that the SDK firmware runs.
 - The toolchain is PlatformIO espressif32 with **Arduino core 3.3** (not 2.0 as the
   SDK guide says). The first build downloads about 2.4 GB into `~/.platformio`.
   A clean build takes about 2 min.
@@ -146,8 +162,9 @@ backslashes.
 
 ## Status
 
-- The firmware compiles: 44% of RAM (the audio buffer is 120 KB). **It has not
-  run on the board yet.**
+- The firmware compiles: 44% of RAM (the audio buffer is 120 KB). It was
+  **flashed to the board on 2026-11-21**; the on-device end-to-end test is in
+  progress.
 - Things to verify on the device:
   - USB `availableForWrite()` gating.
   - Mic levels, using the WAVs.
