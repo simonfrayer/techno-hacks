@@ -1,0 +1,10 @@
+# Settings the bridge pushes to the board on connect and after every reboot.
+[device]
+# 1-10 storage places, at most 23 characters each, no commas
+places = ["Pharmacy shelf A", "Pharmacy shelf B", "Fridge", "Cabinet 1", "Cabinet 2"]
+# Climate limits. "Near a limit" = within 1 °C of t_min/t_max or 5 points of h_max.
+t_min = 2.0
+t_max = 25.0
+h_max = 60.0
+# How often the board reports temperature and humidity
+report_minutes = 60

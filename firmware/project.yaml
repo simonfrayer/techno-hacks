@@ -1,0 +1,30 @@
+# Medicine intake + storage monitor. The app logic lives in app/medtracker.h;
+# this file places the modules and wires the app into the generated firmware.
+# Build and flash from the repo root:  uv run atech upload firmware
+name: medtracker
+board: 14port
+modules:
+  - {id: button,         instance: button_module,       port: 1}
+  - {id: microphone,     instance: microphone,          ports: [2, 3]}
+  - {id: aht20,          instance: aht20_sensor,        port: 6}
+  - {id: neopixel,       instance: neopixel_grid,       port: 7}
+  # port 8: USB-C power module (no firmware, not listed)
+  - {id: st7735_tft,     instance: st7735_tft,          ports: [9, 10]}
+  - {id: rotary_encoder, instance: rotary_encoder_knob, ports: [13, 14]}
+code:
+  globals: |
+    // Path is relative to the generated build/src/main.cpp, so build with
+    // `atech build firmware` / `atech upload firmware` (output in firmware/build).
+    #include "../../app/medtracker.h"
+  setup: |
+    med::setup();
+  loop: |
+    // Actions from the bridge (voice, saved, error, places, limits, ...).
+    // Unknown ones are left for the SDK, which answers "unknown action".
+    if (atech_action.length()) {
+      const char* err = nullptr;
+      int handled = med::handleAction(atech_action.c_str(), atech_value.c_str(), &err);
+      if (handled == 2) atechFail(err);
+      if (handled) atechDone();
+    }
+    med::loop();
