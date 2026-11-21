@@ -9,7 +9,7 @@
 // streamed over USB to the Python bridge -> it answers with the `voice` action
 // -> pick a storage place with the knob, press the knob to confirm -> `record`
 // event -> the bridge answers `saved` / `error`. Temperature and humidity are
-// reported hourly; the status light shows the storage conditions.
+// reported every 20 s (`report_seconds`); the status light shows the storage conditions.
 //
 // Wire protocol (atech events/actions) is documented in ../../CLAUDE.md.
 #pragma once
@@ -86,7 +86,7 @@ static bool knobReverse = false;
 static float tMin = 2.0f, tMax = 25.0f, hMax = 60.0f;
 static float lastT = NAN, lastH = NAN;
 static int climateLevel = -1;          // 0 ok, 1 near limit, 2 over, -1 unknown
-static uint32_t reportMinutes = 60;
+static uint32_t reportSeconds = 20;    // periodic climate report; set by `report_seconds`
 static unsigned long lastReportMs = 0;
 static bool firstReportDone = false;
 
@@ -191,13 +191,23 @@ static void sendClimate(const char* reason) {
   emit("climate", v);
 }
 
+// The bottom line of the screen, e.g. "23.4C 45%".
+static char shownClimate[16] = "";   // what the screen shows right now
+static void climateText(char* out, size_t n) {
+  if (isnan(lastT)) snprintf(out, n, "--.-C --%%");
+  else snprintf(out, n, "%.1fC %.0f%%", lastT, lastH);
+}
+
 // Read the cached sensor values and re-grade them against the limits.
-// Reports a status change unless `quiet`.
+// Redraws the screen when the shown values change; reports a status change unless `quiet`.
 static void readClimate(bool quiet = false) {
   float t = aht20_sensor.readTemperature();
   float h = aht20_sensor.readHumidity();
   if (isnan(t) || isnan(h) || (t == 0.0f && h == 0.0f)) { lastT = lastH = NAN; }
   else { lastT = t; lastH = h; }
+  char now[16];
+  climateText(now, sizeof(now));
+  if (strcmp(now, shownClimate) != 0) screenDirty = true;
   int lvl;
   if (isnan(lastT)) lvl = -1;
   else if (lastT > tMax || lastT < tMin || lastH > hMax) lvl = 2;
@@ -248,8 +258,8 @@ static void drawScreen() {
   st7735_tft.fillScreen(ST7735_TFT::COLOR_BLACK);
   char b[40];
   // storage strip at the bottom
-  if (isnan(lastT)) snprintf(b, sizeof(b), "--.-C --%%");
-  else snprintf(b, sizeof(b), "%.1fC %.0f%%", lastT, lastH);
+  climateText(b, sizeof(b));
+  strncpy(shownClimate, b, sizeof(shownClimate) - 1);
   uint16_t cc = climateLevel == 2 ? ST7735_TFT::COLOR_RED
               : climateLevel == 1 ? ST7735_TFT::COLOR_ORANGE
                                   : ST7735_TFT::COLOR_GREEN;
@@ -465,10 +475,12 @@ static int handleAction(const char* a, const char* value, const char** err) {
     return 1;
   }
   if (!strcmp(a, "climate_now")) { readClimate(true); sendClimate("requested"); return 1; }
-  if (!strcmp(a, "report_minutes")) {
-    int m = atoi(value);
-    if (m < 1) { *err = "minutes must be >= 1"; return 2; }
-    reportMinutes = m;
+  if (!strcmp(a, "report_seconds") || !strcmp(a, "report_minutes")) {
+    long n = atol(value);
+    if (a[7] == 'm') n *= 60;                       // report_minutes kept for older bridges
+    if (n < 5) { *err = "interval must be >= 5 s"; return 2; }
+    reportSeconds = (uint32_t)n;
+    lastReportMs = millis();
     return 1;
   }
   if (!strcmp(a, "knob_reverse")) { knobReverse = !knobReverse; return 1; }
@@ -527,7 +539,8 @@ static void loop() {
     }
   }
 
-  // climate: read every 10 s, report every reportMinutes (and once at start)
+  // climate: read every 10 s, report every reportSeconds (and once at start).
+  // A due report waits while audio is streaming, so it does not take USB room.
   if (climateTimer.ready(10000)) {
     readClimate();
     if (!firstReportDone && !isnan(lastT)) {
@@ -536,9 +549,10 @@ static void loop() {
       lastReportMs = millis();
     }
   }
-  if (millis() - lastReportMs >= reportMinutes * 60000UL) {
+  if (state != UPLOADING && millis() - lastReportMs >= reportSeconds * 1000UL) {
     lastReportMs = millis();
-    sendClimate("hourly");
+    readClimate(true);   // fresh values, not up to 10 s old
+    sendClimate("periodic");
   }
 
   if (!frameTimer.ready(30)) return;

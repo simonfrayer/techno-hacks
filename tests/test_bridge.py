@@ -73,7 +73,7 @@ def test_configures_board(tmp_path):
     assert board.calls == [
         ("places", "Pharmacy shelf A,Pharmacy shelf B,Fridge,Cabinet 1,Cabinet 2"),
         ("limits", {"t_min": 2.0, "t_max": 25.0, "h_max": 60.0}),
-        ("report_minutes", 60),
+        ("report_seconds", 20),
     ]
 
 
@@ -167,3 +167,12 @@ def test_settings_validation_and_toml(tmp_path):
     s = Settings.load(cfg)
     assert (s.places, s.t_max, s.t_min) == (["Fridge", "Shelf"], 8.0, 2.0)
     assert Settings.load(tmp_path / "nope.toml") == Settings()
+
+
+def test_report_interval_in_seconds(tmp_path):
+    assert Settings().report_seconds == 20
+    with pytest.raises(ValueError):
+        Settings(report_seconds=2)
+    old = tmp_path / "old.toml"
+    old.write_text("[device]\nreport_minutes = 15\n")   # pre-seconds config files still work
+    assert Settings.load(old).report_seconds == 900
