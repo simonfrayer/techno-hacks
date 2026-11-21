@@ -231,9 +231,10 @@ function Index() {
 
 function StatusPill({ s }: { s: string }) {
   const ok = /ok|good|normal/i.test(s);
+  const warn = /warning/i.test(s);
   return (
     <span
-      className={`rounded-full px-3 py-1 text-xs font-medium ${ok ? "bg-success text-primary-foreground" : "bg-warning text-accent-foreground"}`}
+      className={`rounded-full px-3 py-1 text-xs font-medium ${ok ? "bg-success text-primary-foreground" : warn ? "bg-warning text-accent-foreground" : "bg-red-500"}`}
     >
       {s}
     </span>
