@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Protocol
 
-from atech import ActionError, Event
+from atech import ActionError, Event, NoAcknowledgement
 
 from techno_hacks.audio import AudioAssembler
 from techno_hacks.backend import Backend
@@ -78,14 +78,28 @@ class Bridge:
         self._audio: Optional[AudioAssembler] = None
 
     # ------------------------------------------------------------ board config
-    def configure_board(self) -> None:
+    def configure_board(self) -> bool:
+        """Send places, limits and report interval. False if the board did not answer."""
         s = self.settings
         for key, value in (
             ("places", ",".join(screen_text(p) for p in s.places)),
             ("limits", {"t_min": s.t_min, "t_max": s.t_max, "h_max": s.h_max}),
             ("report_minutes", s.report_minutes),
         ):
-            self._call(key, value)
+            try:
+                self.board.call(key, value, timeout=2.0)
+            except NoAcknowledgement:
+                log.warning(
+                    "the board does not answer actions. Is the medtracker firmware flashed? "
+                    "Stop the bridge and run `uv run atech upload firmware` (an atech.dev build "
+                    "never answers). The bridge keeps listening and configures the board when it boots."
+                )
+                return False
+            except ActionError as exc:
+                log.warning("board refused %s: %s", key, exc)
+        log.info("board configured: %d places, %.1f-%.1f C, humidity <= %.0f %%",
+                 len(s.places), s.t_min, s.t_max, s.h_max)
+        return True
 
     # ------------------------------------------------------------ events
     def handle(self, event: Event) -> None:

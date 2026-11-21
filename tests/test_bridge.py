@@ -3,7 +3,7 @@
 import base64
 
 import pytest
-from atech import ActionRejected, Event
+from atech import ActionRejected, Event, NoAcknowledgement
 
 from techno_hacks.audio import linear_to_ulaw
 from techno_hacks.backend import Backend
@@ -28,13 +28,16 @@ def test_non_ascii_name_reaches_board_as_ascii(tmp_path):
 
 
 class FakeBoard:
-    def __init__(self, resend=None, reject=()):
+    def __init__(self, resend=None, reject=(), silent=False):
         self.calls: list[tuple[str, object]] = []
         self.resend = resend or {}      # seq -> chunk value the board answers audio_resend with
         self.reject = set(reject)
+        self.silent = silent            # e.g. still running the atech.dev firmware
 
     def call(self, key, value="", *, timeout=2.0):
         self.calls.append((key, value))
+        if self.silent:
+            raise NoAcknowledgement(f"no answer from the board for action {key!r}")
         if key in self.reject:
             raise ActionRejected(f"the board could not carry out {key!r}: busy.")
 
@@ -72,6 +75,13 @@ def test_configures_board(tmp_path):
         ("limits", {"t_min": 2.0, "t_max": 25.0, "h_max": 60.0}),
         ("report_minutes", 60),
     ]
+
+
+def test_silent_board_gets_one_clear_warning(tmp_path, caplog):
+    board, _, bridge = make(tmp_path, silent=True)
+    assert bridge.configure_board() is False
+    assert board.calls == [("places", "Pharmacy shelf A,Pharmacy shelf B,Fridge,Cabinet 1,Cabinet 2")]
+    assert "atech upload firmware" in caplog.text
 
 
 def test_full_flow_voice_then_saved(tmp_path):
