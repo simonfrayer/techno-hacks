@@ -3,6 +3,10 @@
 # Build and flash from the repo root:  uv run atech upload firmware
 name: medtracker
 board: 14port
+host_actions: false
+libraries:
+  - WiFi
+  - HTTPClient
 modules:
   - {id: button,         instance: button_module,       port: 1}
   - {id: microphone,     instance: microphone,          ports: [2, 3]}

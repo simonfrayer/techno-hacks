@@ -6,14 +6,25 @@
 //   neopixel_grid, aht20_sensor
 //
 // Flow: hold the button and speak (name, expiry, tablet count) -> audio is
-// streamed over USB to the Python bridge -> it answers with the `voice` action
+// posted over HTTP to the Python server -> it returns extracted fields
 // -> pick a storage place with the knob, press the knob to confirm -> `record`
-// event -> the bridge answers `saved` / `error`. Temperature and humidity are
+// is posted -> the server returns `ok` / `error`. Temperature and humidity are
 // reported hourly; the status light shows the storage conditions.
 //
 // Wire protocol (atech events/actions) is documented in ../../CLAUDE.md.
 #pragma once
 #include <Arduino.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+
+#if __has_include("http_secrets.h")
+  #include "http_secrets.h"
+#else
+  #define WIFI_SSID ""
+  #define WIFI_USERNAME ""
+  #define WIFI_PASSWORD ""
+  #define HTTP_SERVER_URL "http://10.209.93.93:8080"
+#endif
 
 namespace med {
 
@@ -124,6 +135,56 @@ static bool emit(const char* key, const char* valueJson, unsigned long waitMs = 
   return writeLine(line, n, waitMs);
 }
 
+static bool httpPost(const char* path, const char* contentType,
+                     uint8_t* body, size_t length, char* response, size_t responseSize) {
+  if (WiFi.status() != WL_CONNECTED) {
+    snprintf(response, responseSize, "{\"error\":\"No Wi-Fi\"}");
+    return false;
+  }
+  HTTPClient http;
+  char url[160];
+  snprintf(url, sizeof(url), "%s%s", HTTP_SERVER_URL, path);
+  if (!http.begin(url)) {
+    snprintf(response, responseSize, "{\"error\":\"HTTP begin failed\"}");
+    return false;
+  }
+  http.setTimeout(5000);
+  http.addHeader("Content-Type", contentType);
+  int code = http.POST(body, length);
+  if (code <= 0) {
+    String error = http.errorToString(code);
+    http.end();
+    snprintf(response, responseSize, "{\"error\":\"%s\"}", error.c_str());
+    return false;
+  }
+  String payload = http.getString();
+  http.end();
+  if (payload.length() >= (int)responseSize) return false;
+  payload.toCharArray(response, responseSize);
+  return code >= 200 && code < 300;
+}
+
+static bool httpPostJson(const char* path, const char* body, char* response, size_t responseSize) {
+  return httpPost(path, "application/json",
+                  (uint8_t*)body, strlen(body), response, responseSize);
+}
+
+static bool httpGet(const char* path, char* response, size_t responseSize) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  HTTPClient http;
+  char url[160];
+  snprintf(url, sizeof(url), "%s%s", HTTP_SERVER_URL, path);
+  if (!http.begin(url)) return false;
+  http.setTimeout(5000);
+  int code = http.GET();
+  if (code <= 0) { http.end(); return false; }
+  String payload = http.getString();
+  http.end();
+  if (payload.length() >= (int)responseSize) return false;
+  payload.toCharArray(response, responseSize);
+  return code >= 200 && code < 300;
+}
+
 static void setState(State s) {
   state = s;
   stateSince = millis();
@@ -189,6 +250,8 @@ static void sendClimate(const char* reason) {
              lastT, lastH, st, reason, tMin, tMax, hMax);
   }
   emit("climate", v);
+  char response[160];
+  httpPostJson("/api/v1/climate", v, response, sizeof(response));
 }
 
 // Read the cached sensor values and re-grade them against the limits.
@@ -334,6 +397,21 @@ static void sendRecord() {
            (unsigned long)recordId, fName, fExpiry, fQty, places[sel]);
   setState(WAIT_SAVE);
   emit("record", v, 200);
+  char response[160];
+  if (httpPostJson("/api/v1/records", v, response, sizeof(response))) {
+    if (strstr(response, "\"ok\":true")) {
+      lastSaveKind = 1;
+      showResult(1, "Stored in DB");
+    } else {
+      lastSaveKind = 2;
+      char msg[40] = "";
+      if (jsonField(response, "error", msg, sizeof(msg))) showResult(2, msg);
+      else showResult(2, "Save failed");
+    }
+  } else {
+    lastSaveKind = 2;
+    showResult(2, "Server error");
+  }
 }
 
 // One audio chunk as an event line. Returns false if the USB buffer had no room.
@@ -350,6 +428,7 @@ static bool sendAudioChunk(int seq, unsigned long waitMs) {
 }
 
 static int audioChunkCount() { return (audioLen + CHUNK - 1) / CHUNK; }
+static bool httpUploadStarted = false;
 
 static void startCapture() {
   audioLen = 0;
@@ -370,6 +449,7 @@ static void finishRecording() {
            (unsigned long)recordId, AUDIO_RATE, (int)audioLen, CHUNK);
   setState(UPLOADING);
   emit("audio_start", v, 200);
+  httpUploadStarted = false;
 }
 
 static void setPlaces(const char* v) {
@@ -485,6 +565,27 @@ static void setup() {
   rotary_encoder_knob.setRingBrightness(40);
   button_module.setColor(0, 0, 255);
   button_module.off();
+
+  if (strlen(WIFI_SSID)) {
+    if (strlen(WIFI_USERNAME)) {
+      WiFi.begin(WIFI_SSID, WPA2_AUTH_PEAP, WIFI_USERNAME,
+                 WIFI_USERNAME, WIFI_PASSWORD);
+    } else {
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    }
+  }
+  char config[512];
+  if (WiFi.status() == WL_CONNECTED && httpGet("/api/v1/config", config, sizeof(config))) {
+    char tmp[16];
+    if (jsonField(config, "t_min", tmp, sizeof(tmp))) tMin = atof(tmp);
+    if (jsonField(config, "t_max", tmp, sizeof(tmp))) tMax = atof(tmp);
+    if (jsonField(config, "h_max", tmp, sizeof(tmp))) hMax = atof(tmp);
+    if (jsonField(config, "report_minutes", tmp, sizeof(tmp))) {
+      int m = atoi(tmp);
+      if (m >= 1) reportMinutes = m;
+    }
+  }
+
   lastReportMs = millis();
   char v[120];
   snprintf(v, sizeof(v), "{\"app\":\"medtracker\",\"audio_max_s\":%d,\"tx_free\":%d}",
@@ -496,8 +597,36 @@ static void setup() {
 static bool btnPressed = false, knobPressed = false;
 static int knobSteps = 0;
 static unsigned long btnUpSince = 0;
+static bool httpConfigLoaded = false;
+static unsigned long lastWifiAttemptMs = 0;
 
 static void loop() {
+  if (strlen(WIFI_SSID) && WiFi.status() != WL_CONNECTED &&
+      millis() - lastWifiAttemptMs >= 10000) {
+    lastWifiAttemptMs = millis();
+    if (strlen(WIFI_USERNAME)) {
+      WiFi.begin(WIFI_SSID, WPA2_AUTH_PEAP, WIFI_USERNAME,
+                 WIFI_USERNAME, WIFI_PASSWORD);
+    } else {
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    }
+  }
+  if (!httpConfigLoaded && WiFi.status() == WL_CONNECTED) {
+    char config[512];
+    if (httpGet("/api/v1/config", config, sizeof(config))) {
+      char tmp[16];
+      if (jsonField(config, "t_min", tmp, sizeof(tmp))) tMin = atof(tmp);
+      if (jsonField(config, "t_max", tmp, sizeof(tmp))) tMax = atof(tmp);
+      if (jsonField(config, "h_max", tmp, sizeof(tmp))) hMax = atof(tmp);
+      if (jsonField(config, "report_minutes", tmp, sizeof(tmp))) {
+        int m = atoi(tmp);
+        if (m >= 1) reportMinutes = m;
+      }
+      httpConfigLoaded = true;
+      screenDirty = true;
+    }
+  }
+
   // rotary_encoder_knob.update() already ran in the generated loop.
   btnPressed |= button_module.wasPressed();
   button_module.wasReleased();  // keep the driver's flag from going stale
@@ -508,22 +637,37 @@ static void loop() {
   if (rotary_encoder_knob.wasRotatedCW()) knobSteps += knobReverse ? -1 : 1;
   if (rotary_encoder_knob.wasRotatedCCW()) knobSteps += knobReverse ? 1 : -1;
 
-  // Stream audio as fast as the USB buffer drains (bounded per pass).
+  // Upload the completed recording directly to the HTTP backend once.
   if (state == UPLOADING) {
-    for (int i = 0; i < 16 && audioSent < audioLen; i++) {
-      if (!sendAudioChunk(audioSeq, 0)) break;
-      audioSeq++;
-      audioSent += CHUNK;
-      if (audioSent > audioLen) audioSent = audioLen;
-    }
-    if (millis() - lastUploadDraw > 250) { lastUploadDraw = millis(); screenDirty = true; }
-    if (audioSent >= audioLen) {
-      char v[96];
-      snprintf(v, sizeof(v), "{\"id\":%lu,\"chunks\":%d,\"bytes\":%d}",
-               (unsigned long)recordId, audioSeq, (int)audioLen);
-      if (emit("audio_end", v, 200)) setState(WAIT_VOICE);
-    } else if (millis() - stateSince > UPLOAD_TIMEOUT_MS) {
-      showResult(3, "No computer");
+    if (!httpUploadStarted) {
+      httpUploadStarted = true;
+      audioSent = audioLen;
+      char path[96];
+      snprintf(path, sizeof(path), "/api/v1/audio?id=%lu&rate=%d",
+               (unsigned long)recordId, AUDIO_RATE);
+      char response[512];
+      if (httpPost(path, "application/octet-stream",
+                   audioBuf, (size_t)audioLen,
+                   response, sizeof(response))) {
+        char tmp[24];
+        char name[sizeof(fName)] = "", expiry[sizeof(fExpiry)] = "", quantity[sizeof(fQty)] = "";
+        if (jsonField(response, "name", name, sizeof(name)) &&
+            jsonField(response, "expiry", expiry, sizeof(expiry)) &&
+            jsonField(response, "quantity", quantity, sizeof(quantity))) {
+          strcpy(fName, name);
+          strcpy(fExpiry, expiry);
+          strcpy(fQty, quantity);
+          sel = 0;
+          setState(MENU);
+        } else {
+          showResult(2, "No details");
+        }
+      } else {
+        char error[40] = "";
+        if (jsonField(response, "error", error, sizeof(error))) showResult(2, error);
+        else if (WiFi.status() != WL_CONNECTED) showResult(2, "No server");
+        else showResult(2, "Server error");
+      }
     }
   }
 

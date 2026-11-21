@@ -32,6 +32,22 @@ uv run techno-hacks stt-check --say "Ibuprofen 400, expires March 2027, 20 table
 uv run techno-hacks stt-check data/recordings/<id>.wav
 ```
 
+For direct board-to-laptop HTTP:
+
+```bash
+uv run techno-hacks serve --host 0.0.0.0 --port 8080
+```
+
+Copy `firmware/app/http_secrets.h.example` to `firmware/app/http_secrets.h`,
+set the Wi-Fi username/password and laptop LAN URL, then rebuild and flash:
+
+```bash
+uv run atech upload firmware
+```
+
+The secrets header is ignored by Git. If the laptop is on Windows, allow the
+Python process through the Private-network firewall profile.
+
 Storage places and climate limits are in `medtracker.toml`. Records and
 recordings go to `data/`.
 

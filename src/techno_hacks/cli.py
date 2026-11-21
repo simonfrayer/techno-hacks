@@ -56,6 +56,30 @@ def _cmd_stt_check(args: argparse.Namespace) -> int:
     return status
 
 
+def _cmd_serve(args: argparse.Namespace) -> int:
+    from techno_hacks.backend import Backend
+    from techno_hacks.bridge import Settings
+    from techno_hacks.http_server import serve
+    from techno_hacks.store import Store
+    from techno_hacks.transcribe import get_transcriber
+
+    settings = Settings.load(Path(args.config))
+    kwargs = {"model": args.whisper_model} if args.transcriber == "whisper" else {}
+    transcriber = get_transcriber(args.transcriber, **kwargs)
+    if hasattr(transcriber, "load"):
+        transcriber.load()
+    backend = Backend(Store(args.db), transcriber, Path(args.recordings))
+    server = serve(args.host, args.port, backend, settings)
+    print(f"HTTP server running on http://{args.host}:{args.port} (Ctrl-C to stop)")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
+
+
 def _cmd_records(args: argparse.Namespace) -> int:
     from techno_hacks.store import Store
 
@@ -93,6 +117,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--say", help="speak this with macOS `say` and transcribe it")
     p.add_argument("--whisper-model", default="base.en")
     p.set_defaults(func=_cmd_stt_check)
+
+    p = sub.add_parser("serve", help="serve the board directly over HTTP")
+    p.add_argument("--host", default="0.0.0.0")
+    p.add_argument("--port", type=int, default=8080)
+    p.add_argument("--transcriber", default="whisper",
+                   help="speech-to-text: whisper | manual | fixed (default: whisper)")
+    p.add_argument("--whisper-model", default="base.en")
+    p.add_argument("--db", default=str(DEFAULT_DB))
+    p.add_argument("--recordings", default=str(DEFAULT_RECORDINGS))
+    p.add_argument("--config", default=str(DEFAULT_CONFIG), help="TOML with a [device] table")
+    p.set_defaults(func=_cmd_serve)
 
     p = sub.add_parser("records", help="list stored records")
     p.add_argument("--db", default=str(DEFAULT_DB))
